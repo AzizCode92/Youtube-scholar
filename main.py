@@ -1,10 +1,11 @@
 # main.py
 from fastapi import FastAPI, BackgroundTasks, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
+from typing import List, Dict, Optional
 import uuid
 import time
-import video_processor # Add this import at the top
+import video_processor 
 
 app = FastAPI()
 
@@ -55,7 +56,6 @@ def process_video_analysis(task_id: str, youtube_url: str):
         "chapters": chapters,
         "visuals": visuals,
         "qa": qa,
-        # Store full text for deeper analysis later
         "full_text": full_text 
     }
     print(f"Task {task_id} completed.")
@@ -70,7 +70,7 @@ def analyze_video(youtube_url: str, background_tasks: BackgroundTasks):
 def get_status(task_id: str):
     return tasks.get(task_id, {"status": "not_found"})
 
-# --- NEW ENDPOINT FOR GEMINI ANALYSIS ---
+# --- ENDPOINT FOR GEMINI ANALYSIS ---
 
 class DeeperAnalysisRequest(BaseModel):
     text: str
@@ -80,24 +80,27 @@ def deeper_analysis(request: DeeperAnalysisRequest):
     if not request.text:
         raise HTTPException(status_code=400, detail="No text provided for analysis.")
     
-    # This is a synchronous call, as the user is waiting for the result.
     analysis_result = video_processor.get_gemini_deeper_analysis(request.text)
     return analysis_result
 
-# --- NEW ENDPOINT FOR INTERACTIVE Q&A ---
+# --- UPDATED ENDPOINT FOR INTERACTIVE Q&A (CHAT) ---
 
 class AskRequest(BaseModel):
     task_id: str
     question: str
+    history: Optional[List[Dict[str, str]]] = Field(default_factory=list)
 
 @app.post("/ask")
 def ask_question(request: AskRequest):
-    print(f"Received /ask request: {request}")
+    print(f"Received /ask request: {request.question}")
     task = tasks.get(request.task_id)
     if not task or not task.get("result") or not task["result"].get("full_text"):
         print("Task or transcript not found.")
         raise HTTPException(status_code=404, detail="Task or transcript not found.")
+    
     full_text = task["result"]["full_text"]
-    answer = video_processor.get_llm_answer(full_text, request.question)
+    # Pass the history to the LLM function
+    answer = video_processor.get_llm_answer(full_text, request.question, request.history)
+    
     print(f"Returning answer: {answer}")
     return {"answer": answer}

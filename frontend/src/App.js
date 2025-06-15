@@ -2,11 +2,11 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import YouTube from 'react-youtube';
-import './App.css';
+import './App.css'; 
 
 const API_URL = 'http://localhost:8000';
 
-// --- New Component for Gemini Results ---
+// --- Component for Deeper Analysis Results ---
 function DeeperAnalysisResult({ analysis }) {
   if (!analysis) return null;
 
@@ -41,22 +41,31 @@ function App() {
   const [url, setUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [task, setTask] = useState(null);
-  const [taskId, setTaskId] = useState(null); // Added state for taskId
+  const [taskId, setTaskId] = useState(null);
   const [error, setError] = useState('');
   
-  // --- New State for Gemini Feature ---
-  const [deeperAnalysis, setDeeperAnalysis] = useState({}); // Store analysis by chapter/full
-  const [isDeeperLoading, setIsDeeperLoading] = useState(null); // Tracks which item is loading
+  // --- State for Gemini Feature ---
+  const [deeperAnalysis, setDeeperAnalysis] = useState({});
+  const [isDeeperLoading, setIsDeeperLoading] = useState(null);
 
+  // --- NEW STATE FOR CHAT FEATURE ---
   const [userQuestion, setUserQuestion] = useState("");
-  const [askAnswer, setAskAnswer] = useState(null);
+  const [conversation, setConversation] = useState([]);
   const [isAsking, setIsAsking] = useState(false);
 
   const intervalRef = useRef(null);
   const playerRef = useRef(null);
+  const messagesEndRef = useRef(null);
   const [videoId, setVideoId] = useState(null);
 
-  // Extract YouTube video ID from URL
+  const scrollToBottom = () => {
+    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
+  };
+
+  useEffect(() => {
+    scrollToBottom();
+  }, [conversation, isAsking]);
+
   const extractVideoId = (youtubeUrl) => {
     const regExp = /^.*(?:http:\/\/googleusercontent.com\/youtube.com\/0\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#&?]*).*/;
     const match = youtubeUrl.match(regExp);
@@ -84,10 +93,9 @@ function App() {
     return () => clearInterval(intervalRef.current);
   }, []);
 
-  // When a new task is set, extract video ID
   useEffect(() => {
     if (url) {
-        setVideoId(extractVideoId(url));
+      setVideoId(extractVideoId(url));
     }
   }, [url]);
 
@@ -95,19 +103,17 @@ function App() {
     e.preventDefault();
     setError('');
     setTask(null);
-    setTaskId(null); // Reset task ID
-    setDeeperAnalysis({}); // Clear old results
-    setAskAnswer(null); // Clear previous answer
-    setUserQuestion(""); // Clear previous question
+    setTaskId(null);
+    setDeeperAnalysis({});
+    setConversation([]); // Clear chat history
+    setUserQuestion("");
     setIsLoading(true);
 
     try {
-      const { data } = await axios.post(`${API_URL}/analyze`, null, { // Corrected: send URL as a param
-        params: { youtube_url: url }
-      });
+      const { data } = await axios.post(`${API_URL}/analyze?youtube_url=${encodeURIComponent(url)}`);
       if (data.task_id) {
         setTask({ status: 'accepted', task_id: data.task_id });
-        setTaskId(data.task_id); // Set the task ID here
+        setTaskId(data.task_id);
         pollStatus(data.task_id);
       }
     } catch (err) {
@@ -116,7 +122,6 @@ function App() {
     }
   };
 
-  // --- New Function to Handle Gemini Analysis Request ---
   const handleDeeperAnalysis = async (text, id) => {
     setIsDeeperLoading(id);
     try {
@@ -134,52 +139,49 @@ function App() {
   const getChapterText = (chapterTimestamp) => {
     if (!task || !task.result || !task.result.transcript) return "";
     const { transcript, chapters } = task.result;
-    
     const chapterIndex = chapters.findIndex(c => c.timestamp === chapterTimestamp);
     if (chapterIndex === -1) return "";
-    
     const startIndex = transcript.findIndex(t => t.timestamp === chapterTimestamp);
     if (startIndex === -1) return "";
-    
     const isLastChapter = chapterIndex === chapters.length - 1;
     const endIndex = isLastChapter 
       ? transcript.length 
       : transcript.findIndex(t => t.timestamp === chapters[chapterIndex + 1].timestamp);
-
     const relevantSegments = transcript.slice(startIndex, endIndex === -1 ? transcript.length : endIndex);
     return relevantSegments.map(s => s.text).join(' ');
   }
 
-  // Seek video to seconds
   const handleSeek = (timestamp) => {
     if (!playerRef.current || typeof playerRef.current.seekTo !== 'function') return;
-    // timestamp is in mm:ss
     const [min, sec] = timestamp.split(":").map(Number);
     const seconds = min * 60 + sec;
     playerRef.current.seekTo(seconds, true);
   };
 
-  // Handle Ask Me Anything
   const handleAsk = async (e) => {
     e.preventDefault();
     if (!userQuestion.trim() || !taskId) return;
+
+    const newConversation = [...conversation, { sender: 'user', text: userQuestion }];
+    setConversation(newConversation);
     setIsAsking(true);
-    setAskAnswer(null);
+    const currentQuestion = userQuestion;
+    setUserQuestion('');
+
     try {
-      const { data } = await axios.post(`${API_URL}/ask`, { // Corrected: send JSON payload
+      const { data } = await axios.post(`${API_URL}/ask`, {
         task_id: taskId,
-        question: userQuestion.trim(),
+        question: currentQuestion.trim(),
+        history: newConversation.slice(0, -1) // Send context
       });
-      setAskAnswer(data.answer);
+      setConversation([...newConversation, { sender: 'ai', text: data.answer }]);
     } catch (err) {
-        console.error("Error asking question:", err); // Log the error
-      setAskAnswer("Failed to get answer. Please try again.");
+      setConversation([...newConversation, { sender: 'ai', text: "Sorry, I ran into an error. Please try again." }]);
     } finally {
       setIsAsking(false);
     }
   };
 
-  // Render transcript with clickable timestamps
   const renderTranscript = (transcript) => (
     <div className="transcript">
       {transcript.map((t, idx) => (
@@ -268,27 +270,36 @@ function App() {
           {renderTranscript(result.transcript)}
         </div>
 
+        {/* --- NEW CHAT WINDOW --- */}
         <div className="result-section">
-          <h3>Ask Me Anything <span role="img" aria-label="chat">💬</span></h3>
-          <form onSubmit={handleAsk} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
-            <input
-              type="text"
-              value={userQuestion}
-              onChange={e => setUserQuestion(e.target.value)}
-              placeholder="Ask a question about this video..."
-              style={{ flex: 1, padding: 8, borderRadius: 4, border: '1px solid #ccc' }}
-              disabled={isAsking}
-            />
-            <button type="submit" className="gemini-button" disabled={isAsking || !userQuestion.trim()}>
-              {isAsking ? "Asking..." : "Ask"}
-            </button>
-          </form>
-          {askAnswer && (
-            <div style={{ background: '#f9f9f9', borderRadius: 6, padding: 12, marginTop: 4, border: '1px solid #eee' }}>
-              <strong>Answer:</strong> {askAnswer}
+          <h3>Chat with AI Assistant <span role="img" aria-label="chat">💬</span></h3>
+          <div className="chat-window">
+            <div className="message-list">
+              {conversation.map((msg, index) => (
+                <div key={index} className={`message ${msg.sender}`}>
+                  <p>{msg.text}</p>
+                </div>
+              ))}
+              {isAsking && (
+                <div className="message ai">
+                  <p><i>Typing...</i></p>
+                </div>
+              )}
+              <div ref={messagesEndRef} />
             </div>
-          )}
+            <form onSubmit={handleAsk} className="chat-input-form">
+              <input
+                type="text"
+                value={userQuestion}
+                onChange={e => setUserQuestion(e.target.value)}
+                placeholder="Ask a follow-up question..."
+                disabled={isAsking}
+              />
+              <button type="submit" disabled={isAsking || !userQuestion.trim()}>Send</button>
+            </form>
+          </div>
         </div>
+
       </div>
     );
   };
@@ -308,7 +319,7 @@ function App() {
             placeholder="Enter YouTube URL"
             disabled={isLoading}
           />
-          <button type="submit" disabled={isLoading || !url.trim()}>
+          <button type="submit" disabled={isLoading}>
             {isLoading ? 'Analyzing...' : 'Analyze'}
           </button>
         </form>

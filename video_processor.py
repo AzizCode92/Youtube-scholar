@@ -4,8 +4,8 @@ import whisper
 import requests
 import json
 import cv2
+from typing import List, Dict
 
-# This is a new import needed for the Gemini feature
 from fastapi import HTTPException
 
 
@@ -41,7 +41,7 @@ def download_media(youtube_url: str, task_id: str):
 def transcribe_audio(audio_path: str):
     """Transcribes audio using Whisper and returns a timestamped transcript."""
     try:
-        model = whisper.load_model("base") # Downloads model on first run
+        model = whisper.load_model("base")
         result = model.transcribe(audio_path)
         
         transcript = []
@@ -73,10 +73,9 @@ def get_llm_analysis(full_text: str):
                 "model": MODEL_NAME,
                 "prompt": prompt,
                 "stream": False,
-                 "format": "json" # Request JSON output
-            }, timeout=300) # 5 minute timeout
+                 "format": "json"
+            }, timeout=300)
             response.raise_for_status()
-            # The actual JSON content is in the 'response' key of the JSON payload
             return json.loads(response.json()['response'])
         except requests.exceptions.RequestException as e:
             print(f"Error querying Ollama: {e}")
@@ -87,7 +86,6 @@ def get_llm_analysis(full_text: str):
             return None
 
 
-    # --- Prompt for Summary ---
     summary_prompt = f"""
     Based on the following transcript, provide a concise, high-level summary of about 3-4 sentences.
     Return ONLY a JSON object with a single key "summary" containing the text.
@@ -99,7 +97,6 @@ def get_llm_analysis(full_text: str):
     summary = summary_json.get('summary', 'Could not generate summary.') if summary_json else 'Failed to connect to Ollama.'
 
 
-    # --- Prompt for Chapters ---
     chapters_prompt = f"""
     Based on the following transcript, identify the main topics and provide a table of contents.
     Return ONLY a JSON object with a single key "chapters", which is an array of objects, each with "timestamp" (string) and "topic" (string) keys.
@@ -112,7 +109,6 @@ def get_llm_analysis(full_text: str):
     chapters = chapters_json.get('chapters', []) if chapters_json else []
 
 
-    # --- Prompt for Q&A ---
     qa_prompt = f"""
     Based on the following transcript, generate 3-4 insightful questions and their answers.
     Return ONLY a JSON object with a single key "qa", which is an array of objects, each with "question" (string) and "answer" (string) keys.
@@ -126,15 +122,12 @@ def get_llm_analysis(full_text: str):
     return summary, chapters, qa
 
 
-# --- NEW FUNCTION FOR GEMINI API ---
 def get_gemini_deeper_analysis(text_to_analyze: str):
     """
     Queries the Gemini API for a deeper analysis of the provided text.
     """
-    # NOTE: The API key is handled by the execution environment.
-    # You would typically get this from an environment variable.
     API_KEY = "" 
-    API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash:generateContent?key={API_KEY}"
+    API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={API_KEY}"
 
     prompt = f"""
     You are a research assistant. Analyze the following text from a video transcript.
@@ -168,7 +161,6 @@ def get_gemini_deeper_analysis(text_to_analyze: str):
         
         if 'candidates' in result_json and result_json['candidates']:
             content = result_json['candidates'][0]['content']['parts'][0]['text']
-            # Clean the response to ensure it's valid JSON
             cleaned_content = content.strip().replace("```json", "").replace("```", "")
             return json.loads(cleaned_content)
         else:
@@ -182,20 +174,35 @@ def get_gemini_deeper_analysis(text_to_analyze: str):
         raise HTTPException(status_code=500, detail="Failed to parse Gemini API response.")
 
 
-def get_llm_answer(full_text: str, user_question: str):
+def get_llm_answer(full_text: str, user_question: str, history: List[Dict[str, str]] = []):
     """
-    Queries the local Ollama server to answer a custom user question about the transcript.
+    Queries the local Ollama server to answer a custom user question,
+    considering the conversation history for context.
     """
     OLLAMA_API_URL = "http://localhost:11434/api/generate"
     MODEL_NAME = "llama3"
+
+    history_prompt = ""
+    for message in history:
+        if message.get('sender') == 'user':
+            history_prompt += f"The user previously asked: {message.get('text')}\n"
+        elif message.get('sender') == 'ai':
+            history_prompt += f"You previously answered: {message.get('text')}\n"
+
     prompt = f"""
-    You are an expert assistant. Given the following transcript, answer the user's question as clearly and concisely as possible.
-    Transcript:
+    You are an expert assistant. Your knowledge is based *only* on the provided video transcript.
+    Given the transcript and the recent conversation history, provide a clear and concise answer to the user's current question.
+    If the answer cannot be found in the transcript, say "I cannot answer that based on the video content."
+
+    --- VIDEO TRANSCRIPT ---
+    {full_text[:8000]} 
     ---
-    {full_text[:4000]}
+
+    --- CONVERSATION HISTORY ---
+    {history_prompt if history_prompt else "No previous conversation."}
     ---
-    Question: {user_question}
-    Answer in 3-5 sentences.
+
+    CURRENT QUESTION: {user_question}
     """
     try:
         response = requests.post(OLLAMA_API_URL, json={
@@ -204,10 +211,10 @@ def get_llm_answer(full_text: str, user_question: str):
             "stream": False
         }, timeout=120)
         response.raise_for_status()
-        return response.json().get('response', 'No answer generated.')
+        return response.json().get('response', 'No answer was generated.')
     except Exception as e:
         print(f"Error in get_llm_answer: {e}")
-        return "Failed to get answer from LLM."
+        return "Failed to get an answer from the language model."
 
 
 def extract_visuals(video_path: str):
@@ -216,7 +223,7 @@ def extract_visuals(video_path: str):
     try:
         vidcap = cv2.VideoCapture(video_path)
         fps = vidcap.get(cv2.CAP_PROP_FPS)
-        frame_interval = int(fps * 30) # A frame every 30 seconds
+        frame_interval = int(fps * 30)
         
         frame_count = 0
         while True:
