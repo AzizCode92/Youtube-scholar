@@ -26,16 +26,29 @@ YouTube Scholar is an AI-powered research assistant for YouTube videos. It allow
     - "Explain Like I'm 5" (ELI5) summary
     - Follow-up questions
 
-### 3. Modern Frontend
+### 3. Interactive YouTube Player & Transcript
+- **Embedded YouTube player** on the results page.
+- **Interactive transcript:** Click any timestamp or line to seek the video to that exact moment.
+- **Benefit:** Instantly verify context or watch a key segment directly from the analysis.
+
+### 4. Ask Me Anything (Custom Q&A)
+- **Feature:** Users can ask their own questions about the video content using a chat input box.
+- **Process:**
+  - The question is sent to the backend, which uses the transcript and an LLM to generate a custom answer.
+  - The answer is displayed below the input.
+- **Benefit:** Transforms the tool into a dynamic, interactive research assistant.
+
+### 5. Modern Frontend
 - **React-based UI** for submitting YouTube URLs, viewing analysis results, and requesting deeper insights.
 - **Status updates** for long-running tasks (downloading, transcribing, analyzing, etc.).
 - **Beautiful, responsive design** with clear sections for each result type.
 
-### 4. Backend API
+### 6. Backend API
 - **FastAPI** server with endpoints for:
   - `/analyze`: Start video analysis (runs in background)
   - `/status/{task_id}`: Check status and get results
   - `/deeper-analysis`: Request Gemini-powered analysis for any text
+  - `/ask`: Ask custom questions about the video transcript
 
 ## Requirements
 - Python 3.8+
@@ -62,4 +75,4 @@ YouTube Scholar is an AI-powered research assistant for YouTube videos. It allow
 
 ---
 
-**YouTube Scholar** helps you learn from videos faster by providing AI-powered summaries, chapters, and deep insights at your fingertips.
+**YouTube Scholar** helps you learn from videos faster by providing AI-powered summaries, chapters, interactive video navigation, and deep insights at your fingertips.
