@@ -182,6 +182,34 @@ def get_gemini_deeper_analysis(text_to_analyze: str):
         raise HTTPException(status_code=500, detail="Failed to parse Gemini API response.")
 
 
+def get_llm_answer(full_text: str, user_question: str):
+    """
+    Queries the local Ollama server to answer a custom user question about the transcript.
+    """
+    OLLAMA_API_URL = "http://localhost:11434/api/generate"
+    MODEL_NAME = "llama3"
+    prompt = f"""
+    You are an expert assistant. Given the following transcript, answer the user's question as clearly and concisely as possible.
+    Transcript:
+    ---
+    {full_text[:4000]}
+    ---
+    Question: {user_question}
+    Answer in 3-5 sentences.
+    """
+    try:
+        response = requests.post(OLLAMA_API_URL, json={
+            "model": MODEL_NAME,
+            "prompt": prompt,
+            "stream": False
+        }, timeout=120)
+        response.raise_for_status()
+        return response.json().get('response', 'No answer generated.')
+    except Exception as e:
+        print(f"Error in get_llm_answer: {e}")
+        return "Failed to get answer from LLM."
+
+
 def extract_visuals(video_path: str):
     """Extracts a frame every 30 seconds and returns their timestamps."""
     visuals = []

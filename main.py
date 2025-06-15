@@ -45,8 +45,8 @@ def process_video_analysis(task_id: str, youtube_url: str):
     tasks[task_id]["stage"] = "analyzing_visuals"
     visuals = video_processor.extract_visuals(video_path)
     
-    # import shutil
-    # shutil.rmtree(f"temp/{task_id}")
+    import shutil
+    shutil.rmtree(f"temp/{task_id}")
 
     tasks[task_id]["status"] = "completed"
     tasks[task_id]["result"] = {
@@ -83,3 +83,21 @@ def deeper_analysis(request: DeeperAnalysisRequest):
     # This is a synchronous call, as the user is waiting for the result.
     analysis_result = video_processor.get_gemini_deeper_analysis(request.text)
     return analysis_result
+
+# --- NEW ENDPOINT FOR INTERACTIVE Q&A ---
+
+class AskRequest(BaseModel):
+    task_id: str
+    question: str
+
+@app.post("/ask")
+def ask_question(request: AskRequest):
+    print(f"Received /ask request: {request}")
+    task = tasks.get(request.task_id)
+    if not task or not task.get("result") or not task["result"].get("full_text"):
+        print("Task or transcript not found.")
+        raise HTTPException(status_code=404, detail="Task or transcript not found.")
+    full_text = task["result"]["full_text"]
+    answer = video_processor.get_llm_answer(full_text, request.question)
+    print(f"Returning answer: {answer}")
+    return {"answer": answer}

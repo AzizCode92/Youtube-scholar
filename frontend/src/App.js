@@ -1,7 +1,8 @@
 // src/App.js
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
-import './App.css'; 
+import YouTube from 'react-youtube';
+import './App.css';
 
 const API_URL = 'http://localhost:8000';
 
@@ -40,19 +41,32 @@ function App() {
   const [url, setUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
   const [task, setTask] = useState(null);
+  const [taskId, setTaskId] = useState(null); // Added state for taskId
   const [error, setError] = useState('');
   
   // --- New State for Gemini Feature ---
   const [deeperAnalysis, setDeeperAnalysis] = useState({}); // Store analysis by chapter/full
   const [isDeeperLoading, setIsDeeperLoading] = useState(null); // Tracks which item is loading
 
+  const [userQuestion, setUserQuestion] = useState("");
+  const [askAnswer, setAskAnswer] = useState(null);
+  const [isAsking, setIsAsking] = useState(false);
 
   const intervalRef = useRef(null);
+  const playerRef = useRef(null);
+  const [videoId, setVideoId] = useState(null);
 
-  const pollStatus = (taskId) => {
+  // Extract YouTube video ID from URL
+  const extractVideoId = (youtubeUrl) => {
+    const regExp = /^.*(?:http:\/\/googleusercontent.com\/youtube.com\/0\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#&?]*).*/;
+    const match = youtubeUrl.match(regExp);
+    return (match && match[1].length === 11) ? match[1] : null;
+  };
+
+  const pollStatus = (currentTaskId) => {
     intervalRef.current = setInterval(async () => {
       try {
-        const { data } = await axios.get(`${API_URL}/status/${taskId}`);
+        const { data } = await axios.get(`${API_URL}/status/${currentTaskId}`);
         setTask(data);
         if (data.status === 'completed' || data.status === 'failed') {
           clearInterval(intervalRef.current);
@@ -70,17 +84,30 @@ function App() {
     return () => clearInterval(intervalRef.current);
   }, []);
 
+  // When a new task is set, extract video ID
+  useEffect(() => {
+    if (url) {
+        setVideoId(extractVideoId(url));
+    }
+  }, [url]);
+
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
     setTask(null);
+    setTaskId(null); // Reset task ID
     setDeeperAnalysis({}); // Clear old results
+    setAskAnswer(null); // Clear previous answer
+    setUserQuestion(""); // Clear previous question
     setIsLoading(true);
 
     try {
-      const { data } = await axios.post(`${API_URL}/analyze?youtube_url=${encodeURIComponent(url)}`);
+      const { data } = await axios.post(`${API_URL}/analyze`, null, { // Corrected: send URL as a param
+        params: { youtube_url: url }
+      });
       if (data.task_id) {
         setTask({ status: 'accepted', task_id: data.task_id });
+        setTaskId(data.task_id); // Set the task ID here
         pollStatus(data.task_id);
       }
     } catch (err) {
@@ -123,12 +150,74 @@ function App() {
     return relevantSegments.map(s => s.text).join(' ');
   }
 
+  // Seek video to seconds
+  const handleSeek = (timestamp) => {
+    if (!playerRef.current || typeof playerRef.current.seekTo !== 'function') return;
+    // timestamp is in mm:ss
+    const [min, sec] = timestamp.split(":").map(Number);
+    const seconds = min * 60 + sec;
+    playerRef.current.seekTo(seconds, true);
+  };
+
+  // Handle Ask Me Anything
+  const handleAsk = async (e) => {
+    e.preventDefault();
+    if (!userQuestion.trim() || !taskId) return;
+    setIsAsking(true);
+    setAskAnswer(null);
+    try {
+      const { data } = await axios.post(`${API_URL}/ask`, { // Corrected: send JSON payload
+        task_id: taskId,
+        question: userQuestion.trim(),
+      });
+      setAskAnswer(data.answer);
+    } catch (err) {
+        console.error("Error asking question:", err); // Log the error
+      setAskAnswer("Failed to get answer. Please try again.");
+    } finally {
+      setIsAsking(false);
+    }
+  };
+
+  // Render transcript with clickable timestamps
+  const renderTranscript = (transcript) => (
+    <div className="transcript">
+      {transcript.map((t, idx) => (
+        <p key={t.timestamp + idx}>
+          <span
+            className="transcript-timestamp"
+            style={{ color: '#1a73e8', cursor: 'pointer', fontWeight: 'bold' }}
+            onClick={() => handleSeek(t.timestamp)}
+          >
+            {t.timestamp}
+          </span>
+          {" - "}
+          <span
+            className="transcript-text"
+            onClick={() => handleSeek(t.timestamp)}
+            style={{ cursor: 'pointer' }}
+          >
+            {t.text}
+          </span>
+        </p>
+      ))}
+    </div>
+  );
 
   const renderResult = () => {
     if (!task || !task.result) return null;
     const { result } = task;
     return (
       <div className="results-container">
+        {videoId && (
+          <div style={{ marginBottom: 24 }}>
+            <YouTube
+              videoId={videoId}
+              opts={{ width: '100%', height: '390', playerVars: { rel: 0 } }}
+              onReady={e => { playerRef.current = e.target; }}
+            />
+          </div>
+        )}
         <h2>Analysis Result</h2>
 
         <div className="result-section">
@@ -176,9 +265,29 @@ function App() {
         
         <div className="result-section">
           <h3>Transcript</h3>
-          <div className="transcript">
-            {result.transcript.map(t => <p key={t.timestamp}><strong>{t.timestamp}</strong> - {t.text}</p>)}
-          </div>
+          {renderTranscript(result.transcript)}
+        </div>
+
+        <div className="result-section">
+          <h3>Ask Me Anything <span role="img" aria-label="chat">💬</span></h3>
+          <form onSubmit={handleAsk} style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <input
+              type="text"
+              value={userQuestion}
+              onChange={e => setUserQuestion(e.target.value)}
+              placeholder="Ask a question about this video..."
+              style={{ flex: 1, padding: 8, borderRadius: 4, border: '1px solid #ccc' }}
+              disabled={isAsking}
+            />
+            <button type="submit" className="gemini-button" disabled={isAsking || !userQuestion.trim()}>
+              {isAsking ? "Asking..." : "Ask"}
+            </button>
+          </form>
+          {askAnswer && (
+            <div style={{ background: '#f9f9f9', borderRadius: 6, padding: 12, marginTop: 4, border: '1px solid #eee' }}>
+              <strong>Answer:</strong> {askAnswer}
+            </div>
+          )}
         </div>
       </div>
     );
@@ -199,7 +308,7 @@ function App() {
             placeholder="Enter YouTube URL"
             disabled={isLoading}
           />
-          <button type="submit" disabled={isLoading}>
+          <button type="submit" disabled={isLoading || !url.trim()}>
             {isLoading ? 'Analyzing...' : 'Analyze'}
           </button>
         </form>
