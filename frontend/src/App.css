@@ -1,0 +1,205 @@
+/* src/App.css */
+body { 
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
+    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
+    sans-serif;
+    background-color: #f4f4f9; 
+    color: #333; 
+    margin: 0;
+}
+
+.App { 
+    text-align: center; 
+}
+
+.App-header { 
+    background-color: #282c34; 
+    padding: 20px; 
+    color: white; 
+    margin-bottom: 2rem; 
+    box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.url-form { 
+    margin-bottom: 2rem; 
+}
+
+.url-form input { 
+    padding: 12px 15px; 
+    width: 450px; 
+    max-width: 80%; 
+    border: 1px solid #ccc; 
+    border-radius: 4px;
+    font-size: 1rem;
+}
+
+.url-form button { 
+    padding: 12px 22px; 
+    border: none; 
+    background-color: #6200ea; 
+    color: white; 
+    border-radius: 4px; 
+    margin-left: 10px; 
+    cursor: pointer; 
+    font-size: 1rem;
+    transition: background-color 0.2s;
+}
+
+.url-form button:hover {
+    background-color: #3700b3;
+}
+
+.url-form button:disabled { 
+    background-color: #ccc; 
+    cursor: not-allowed;
+}
+
+.status { 
+    display: inline-block;
+    margin: 20px auto; 
+    padding: 15px 25px; 
+    background-color: #e3f2fd; 
+    border-left: 5px solid #2196f3; 
+    text-align: left;
+    border-radius: 4px;
+}
+
+.error { 
+    display: inline-block;
+    margin: 20px auto; 
+    padding: 15px 25px; 
+    background-color: #ffebee; 
+    border-left: 5px solid #f44336; 
+    color: #c62828; 
+    text-align: left;
+    border-radius: 4px;
+}
+
+.results-container { 
+    text-align: left; 
+    max-width: 800px; 
+    margin: 2rem auto; 
+    padding: 20px 30px; 
+    background: white; 
+    border-radius: 8px; 
+    box-shadow: 0 4px 8px rgba(0,0,0,0.1); 
+}
+
+.result-section { 
+    margin-bottom: 2.5rem; 
+}
+
+.result-section h3 {
+    border-bottom: 2px solid #6200ea;
+    padding-bottom: 8px;
+    margin-bottom: 1rem;
+    color: #3700b3;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.qa-item { 
+    border-bottom: 1px solid #eee; 
+    padding-bottom: 10px; 
+    margin-bottom: 10px; 
+}
+
+.qa-item:last-child {
+    border-bottom: none;
+}
+
+.transcript { 
+    max-height: 300px; 
+    overflow-y: auto; 
+    border: 1px solid #eee; 
+    padding: 15px; 
+    border-radius: 4px; 
+    background-color: #fafafa; 
+    line-height: 1.6;
+}
+
+.transcript p {
+    margin: 0 0 10px 0;
+}
+
+/* --- NEW STYLES FOR GEMINI FEATURE --- */
+
+.gemini-button {
+    background: linear-gradient(45deg, #4285F4, #9b72cb);
+    color: white;
+    border: none;
+    padding: 6px 12px;
+    border-radius: 20px;
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: bold;
+    transition: transform 0.2s;
+}
+
+.gemini-button:hover:not(:disabled) {
+    transform: scale(1.05);
+}
+
+.gemini-button:disabled {
+    opacity: 0.7;
+    cursor: not-allowed;
+}
+
+.gemini-button-small {
+    background: none;
+    border: 1px solid #4285F4;
+    color: #4285F4;
+    border-radius: 50%;
+    width: 28px;
+    height: 28px;
+    margin-left: 15px;
+    cursor: pointer;
+    font-size: 1rem;
+    padding: 0;
+    line-height: 28px;
+}
+.gemini-button-small:hover:not(:disabled) {
+    background-color: #e8f0fe;
+}
+.gemini-button-small:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.chapter-item p {
+    display: flex;
+    align-items: center;
+}
+
+.deeper-analysis-result {
+    margin-top: 1.5rem;
+    padding: 1.5rem;
+    border: 1px solid #e0e0e0;
+    border-radius: 8px;
+    background-color: #f9f9f9;
+    animation: fadeIn 0.5s ease-in-out;
+}
+
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(-10px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.deeper-analysis-result h4 {
+    margin-top: 0;
+    color: #1a73e8;
+}
+
+.deeper-analysis-result h5 {
+    color: #333;
+    margin-bottom: 0.5rem;
+}
+
+.analysis-section {
+    margin-bottom: 1rem;
+}
+.analysis-section ul {
+    padding-left: 20px;
+    margin-top: 5px;
+}
