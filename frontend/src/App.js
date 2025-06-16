@@ -2,6 +2,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import axios from 'axios';
 import YouTube from 'react-youtube';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import './App.css'; 
 
 const API_URL = 'http://localhost:8000';
@@ -37,6 +39,96 @@ function DeeperAnalysisResult({ analysis }) {
 }
 
 
+// --- NEW: Component to Render Chat Messages with Code Highlighting ---
+function ChatMessage({ text }) {
+    // Regex to find code blocks wrapped in ```
+    const parts = text.split(/(```(?:\w+\n)?[\s\S]*?```)/);
+  
+    return (
+      <p>
+        {parts.map((part, index) => {
+          const codeBlockMatch = part.match(/```(?:(\w+)\n)?([\s\S]*?)```/);
+          if (codeBlockMatch) {
+            const language = codeBlockMatch[1] || 'javascript'; // Default to JS if no language specified
+            const code = codeBlockMatch[2];
+            return (
+              <div key={index} className="code-block-wrapper">
+                <SyntaxHighlighter language={language} style={oneDark} customStyle={{ margin: 0, borderRadius: '8px' }}>
+                  {code}
+                </SyntaxHighlighter>
+              </div>
+            );
+          }
+          return part;
+        })}
+      </p>
+    );
+}
+
+// --- Chat Popup Component ---
+function ChatPopup({ isOpen, onClose, onAsk, conversation, isAsking, greeting }) {
+    const [localQuestion, setLocalQuestion] = useState("");
+    const messagesEndRef = useRef(null);
+  
+    useEffect(() => {
+      messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    }, [conversation, isAsking]);
+  
+    if (!isOpen) {
+      return null;
+    }
+  
+    const handleSubmit = (e) => {
+      e.preventDefault();
+      if (!localQuestion.trim()) return;
+      onAsk(localQuestion);
+      setLocalQuestion("");
+    };
+  
+    return (
+      <div className="chat-popup-container">
+        <div className="chat-header">
+          <span>AI Assistant</span>
+          <button className="chat-close" onClick={onClose} aria-label="Close chat">×</button>
+        </div>
+        <div className="chat-body">
+            <div className="message-list">
+                <div className="message ai">
+                    <p>{greeting}</p>
+                </div>
+                {conversation.map((msg, index) => (
+                    <div key={index} className={`message ${msg.sender}`}>
+                        {/* Use the new ChatMessage component here */}
+                        <ChatMessage text={msg.text} />
+                    </div>
+                ))}
+                {isAsking && (
+                    <div className="message ai">
+                        <p><i>Typing...</i></p>
+                    </div>
+                )}
+                <div ref={messagesEndRef} />
+            </div>
+            <form onSubmit={handleSubmit} className="chat-form">
+                <input
+                    type="text"
+                    value={localQuestion}
+                    onChange={(e) => setLocalQuestion(e.target.value)}
+                    placeholder="Ask a question..."
+                    disabled={isAsking}
+                    className="chat-input"
+                    autoFocus
+                />
+                <button type="submit" className="chat-send" disabled={isAsking || !localQuestion.trim()}>
+                    Send
+                </button>
+            </form>
+        </div>
+      </div>
+    );
+}
+
+
 function App() {
   const [url, setUrl] = useState('');
   const [isLoading, setIsLoading] = useState(false);
@@ -44,27 +136,21 @@ function App() {
   const [taskId, setTaskId] = useState(null);
   const [error, setError] = useState('');
   
-  // --- State for Gemini Feature ---
   const [deeperAnalysis, setDeeperAnalysis] = useState({});
   const [isDeeperLoading, setIsDeeperLoading] = useState(null);
 
-  // --- NEW STATE FOR CHAT FEATURE ---
-  const [userQuestion, setUserQuestion] = useState("");
+  // --- Consolidated State for Chat ---
   const [conversation, setConversation] = useState([]);
   const [isAsking, setIsAsking] = useState(false);
+  const [isChatOpen, setIsChatOpen] = useState(false);
+
+  const [flashcards, setFlashcards] = useState([]);
+  const [isGeneratingFlashcards, setIsGeneratingFlashcards] = useState(false);
+  const [flippedCardIds, setFlippedCardIds] = useState(new Set());
 
   const intervalRef = useRef(null);
   const playerRef = useRef(null);
-  const messagesEndRef = useRef(null);
   const [videoId, setVideoId] = useState(null);
-
-  const scrollToBottom = () => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  };
-
-  useEffect(() => {
-    scrollToBottom();
-  }, [conversation, isAsking]);
 
   const extractVideoId = (youtubeUrl) => {
     const regExp = /^.*(?:http:\/\/googleusercontent.com\/youtube.com\/0\/|v\/|u\/\w\/|embed\/|watch\?v=|\&v=)([^#&?]*).*/;
@@ -105,8 +191,10 @@ function App() {
     setTask(null);
     setTaskId(null);
     setDeeperAnalysis({});
-    setConversation([]); // Clear chat history
-    setUserQuestion("");
+    setConversation([]);
+    setFlashcards([]);
+    setFlippedCardIds(new Set());
+    setIsChatOpen(false); // Close chat on new analysis
     setIsLoading(true);
 
     try {
@@ -158,21 +246,18 @@ function App() {
     playerRef.current.seekTo(seconds, true);
   };
 
-  const handleAsk = async (e) => {
-    e.preventDefault();
-    if (!userQuestion.trim() || !taskId) return;
+  const handleAsk = async (question) => {
+    if (!question.trim() || !taskId) return;
 
-    const newConversation = [...conversation, { sender: 'user', text: userQuestion }];
+    const newConversation = [...conversation, { sender: 'user', text: question }];
     setConversation(newConversation);
     setIsAsking(true);
-    const currentQuestion = userQuestion;
-    setUserQuestion('');
 
     try {
       const { data } = await axios.post(`${API_URL}/ask`, {
         task_id: taskId,
-        question: currentQuestion.trim(),
-        history: newConversation.slice(0, -1) // Send context
+        question: question.trim(),
+        history: newConversation.slice(0, -1)
       });
       setConversation([...newConversation, { sender: 'ai', text: data.answer }]);
     } catch (err) {
@@ -182,29 +267,48 @@ function App() {
     }
   };
 
-  const renderTranscript = (transcript) => (
-    <div className="transcript">
-      {transcript.map((t, idx) => (
-        <p key={t.timestamp + idx}>
-          <span
-            className="transcript-timestamp"
-            style={{ color: '#1a73e8', cursor: 'pointer', fontWeight: 'bold' }}
-            onClick={() => handleSeek(t.timestamp)}
-          >
-            {t.timestamp}
-          </span>
-          {" - "}
-          <span
-            className="transcript-text"
-            onClick={() => handleSeek(t.timestamp)}
-            style={{ cursor: 'pointer' }}
-          >
-            {t.text}
-          </span>
-        </p>
-      ))}
-    </div>
-  );
+  const handleGenerateFlashcards = async () => {
+    if (!taskId) return;
+    setIsGeneratingFlashcards(true);
+    setFlashcards([]);
+    try {
+      const { data } = await axios.post(`${API_URL}/generate-flashcards`, { task_id: taskId });
+      setFlashcards(data.flashcards || []);
+    } catch (err) {
+      console.error("Failed to generate flashcards", err);
+      setError("Could not generate flashcards. Please try again.");
+    } finally {
+      setIsGeneratingFlashcards(false);
+    }
+  };
+
+  const handleFlipCard = (index) => {
+    const newFlippedCardIds = new Set(flippedCardIds);
+    if (newFlippedCardIds.has(index)) {
+      newFlippedCardIds.delete(index);
+    } else {
+      newFlippedCardIds.add(index);
+    }
+    setFlippedCardIds(newFlippedCardIds);
+  };
+
+  const getGreetingMessage = () => {
+    if (task && task.result) {
+        let topicSource = task.result.summary || "";
+        if (task.result.chapters && task.result.chapters.length > 0) {
+            topicSource = task.result.chapters[0].topic;
+        }
+        topicSource = topicSource.toLowerCase();
+
+        if (topicSource.includes('leetcode') || topicSource.includes('problem')) {
+            return "Hey! Wanna deep dive into this problem-solving video?";
+        } else if (topicSource.includes('python') || topicSource.includes('react') || topicSource.includes('javascript')) {
+            return `Hi there! Have questions about ${topicSource.split(' ')[0]}? Ask away!`;
+        }
+        return "Hi! Have any questions about the video? Ask me anything.";
+    }
+    return "Hello! How can I help you with this video?";
+  };
 
   const renderResult = () => {
     if (!task || !task.result) return null;
@@ -221,6 +325,30 @@ function App() {
           </div>
         )}
         <h2>Analysis Result</h2>
+
+        <div className="result-section">
+            <h3>Study Flashcards <span role="img" aria-label="cards">📇</span></h3>
+            {flashcards.length === 0 ? (
+                 <button className="gemini-button" onClick={handleGenerateFlashcards} disabled={isGeneratingFlashcards}>
+                    {isGeneratingFlashcards ? 'Generating...' : 'Generate Flashcards from Video'}
+                 </button>
+            ) : (
+                <div className="flashcard-container">
+                    {flashcards.map((card, index) => (
+                        <div key={index} className="flashcard-scene" onClick={() => handleFlipCard(index)}>
+                            <div className={`flashcard ${flippedCardIds.has(index) ? 'is-flipped' : ''}`}>
+                                <div className="flashcard-face flashcard-front">
+                                    <p>{card.front}</p>
+                                </div>
+                                <div className="flashcard-face flashcard-back">
+                                    <p>{card.back}</p>
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                </div>
+            )}
+        </div>
 
         <div className="result-section">
           <h3>Summary <button 
@@ -256,50 +384,29 @@ function App() {
         </div>
 
         <div className="result-section">
-          <h3>Q&A</h3>
-          {result.qa.map((item, i) => (
-            <div key={i} className="qa-item">
-              <p><strong>Q:</strong> {item.question}</p>
-              <p><strong>A:</strong> {item.answer}</p>
-            </div>
-          ))}
-        </div>
-        
-        <div className="result-section">
           <h3>Transcript</h3>
-          {renderTranscript(result.transcript)}
-        </div>
-
-        {/* --- NEW CHAT WINDOW --- */}
-        <div className="result-section">
-          <h3>Chat with AI Assistant <span role="img" aria-label="chat">💬</span></h3>
-          <div className="chat-window">
-            <div className="message-list">
-              {conversation.map((msg, index) => (
-                <div key={index} className={`message ${msg.sender}`}>
-                  <p>{msg.text}</p>
-                </div>
-              ))}
-              {isAsking && (
-                <div className="message ai">
-                  <p><i>Typing...</i></p>
-                </div>
-              )}
-              <div ref={messagesEndRef} />
+          <div className="transcript">
+            {result.transcript.map((t, idx) => (
+                <p key={t.timestamp + idx}>
+                <span
+                    className="transcript-timestamp"
+                    style={{ color: '#1a73e8', cursor: 'pointer', fontWeight: 'bold' }}
+                    onClick={() => handleSeek(t.timestamp)}
+                >
+                    {t.timestamp}
+                </span>
+                {" - "}
+                <span
+                    className="transcript-text"
+                    onClick={() => handleSeek(t.timestamp)}
+                    style={{ cursor: 'pointer' }}
+                >
+                    {t.text}
+                </span>
+                </p>
+            ))}
             </div>
-            <form onSubmit={handleAsk} className="chat-input-form">
-              <input
-                type="text"
-                value={userQuestion}
-                onChange={e => setUserQuestion(e.target.value)}
-                placeholder="Ask a follow-up question..."
-                disabled={isAsking}
-              />
-              <button type="submit" disabled={isAsking || !userQuestion.trim()}>Send</button>
-            </form>
-          </div>
         </div>
-
       </div>
     );
   };
@@ -319,7 +426,7 @@ function App() {
             placeholder="Enter YouTube URL"
             disabled={isLoading}
           />
-          <button type="submit" disabled={isLoading}>
+          <button type="submit" disabled={isLoading || !url.trim()}>
             {isLoading ? 'Analyzing...' : 'Analyze'}
           </button>
         </form>
@@ -333,6 +440,20 @@ function App() {
         {task && task.status === 'completed' && renderResult()}
         {task && task.status === 'failed' && <p className="error">Analysis Failed: {task.result}</p>}
       </main>
+
+      {/* --- FLOATING CHAT BUTTON & POPUP RENDER --- */}
+      {task && task.status === 'completed' && !isChatOpen && (
+         <button className="chat-fab" onClick={() => setIsChatOpen(true)} aria-label="Open chat">💬</button>
+      )}
+      
+      <ChatPopup 
+        isOpen={isChatOpen}
+        onClose={() => setIsChatOpen(false)}
+        onAsk={handleAsk}
+        conversation={conversation}
+        isAsking={isAsking}
+        greeting={getGreetingMessage()}
+      />
     </div>
   );
 }

@@ -83,7 +83,7 @@ def deeper_analysis(request: DeeperAnalysisRequest):
     analysis_result = video_processor.get_gemini_deeper_analysis(request.text)
     return analysis_result
 
-# --- UPDATED ENDPOINT FOR INTERACTIVE Q&A (CHAT) ---
+# --- ENDPOINT FOR INTERACTIVE Q&A (CHAT) ---
 
 class AskRequest(BaseModel):
     task_id: str
@@ -95,12 +95,30 @@ def ask_question(request: AskRequest):
     print(f"Received /ask request: {request.question}")
     task = tasks.get(request.task_id)
     if not task or not task.get("result") or not task["result"].get("full_text"):
-        print("Task or transcript not found.")
         raise HTTPException(status_code=404, detail="Task or transcript not found.")
     
     full_text = task["result"]["full_text"]
-    # Pass the history to the LLM function
     answer = video_processor.get_llm_answer(full_text, request.question, request.history)
     
-    print(f"Returning answer: {answer}")
     return {"answer": answer}
+
+
+# --- NEW ENDPOINT FOR FLASHCARD GENERATION ---
+
+class FlashcardRequest(BaseModel):
+    task_id: str
+
+@app.post("/generate-flashcards")
+def create_flashcards(request: FlashcardRequest):
+    print(f"Received /generate-flashcards request for task: {request.task_id}")
+    task = tasks.get(request.task_id)
+    if not task or not task.get("result") or not task["result"].get("full_text"):
+        raise HTTPException(status_code=404, detail="Analyzed transcript not found.")
+    
+    full_text = task["result"]["full_text"]
+    flashcards = video_processor.generate_flashcards(full_text)
+
+    if flashcards is None:
+        raise HTTPException(status_code=500, detail="Failed to generate flashcards from LLM.")
+
+    return {"flashcards": flashcards}

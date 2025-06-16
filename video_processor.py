@@ -1,68 +1,34 @@
-import yt_dlp
-import os
-import whisper
+from utils import (
+    download_media,
+    transcribe_audio,
+    extract_visuals,
+    Flashcard,
+    FlashcardList,
+    SummaryModel,
+    Chapter,
+    ChaptersModel,
+    QAItem,
+    QAListModel
+)
+from prompts import (
+    SUMMARY_PROMPT,
+    CHAPTERS_PROMPT,
+    QA_PROMPT,
+    FLASHCARD_PROMPT,
+    GEMINI_ANALYSIS_PROMPT,
+    CUSTOM_QA_PROMPT
+)
 import requests
 import json
-import cv2
-from typing import List, Dict
-
 from fastapi import HTTPException
-
-
-def download_media(youtube_url: str, task_id: str):
-    """Downloads audio and video, returning their file paths."""
-    output_path = f"temp/{task_id}"
-    os.makedirs(output_path, exist_ok=True)
-    
-    ydl_audio_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': f'{output_path}/audio.%(ext)s',
-        'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '192'}],
-    }
-    ydl_video_opts = {
-        'format': 'bestvideo[ext=mp4]+bestaudio[ext=m4a]/best[ext=mp4]/best',
-        'outtmpl': f'{output_path}/video.%(ext)s',
-    }
-
-    try:
-        with yt_dlp.YoutubeDL(ydl_audio_opts) as ydl:
-            info = ydl.extract_info(youtube_url, download=True)
-            audio_path = f'{output_path}/audio.mp3'
-        with yt_dlp.YoutubeDL(ydl_video_opts) as ydl:
-            ydl.download([youtube_url])
-            video_path = f'{output_path}/video.mp4'
-        return audio_path, video_path
-    except Exception as e:
-        print(f"Error downloading media: {e}")
-        return None, None
-
-
-
-def transcribe_audio(audio_path: str):
-    """Transcribes audio using Whisper and returns a timestamped transcript."""
-    try:
-        model = whisper.load_model("base")
-        result = model.transcribe(audio_path)
-        
-        transcript = []
-        for segment in result["segments"]:
-            start_time = int(segment['start'])
-            minutes = start_time // 60
-            seconds = start_time % 60
-            timestamp = f"{minutes:02d}:{seconds:02d}"
-            text = segment['text'].strip()
-            transcript.append({"timestamp": timestamp, "text": text})
-            
-        return transcript, result["text"]
-    except Exception as e:
-        print(f"Error during transcription: {e}")
-        return None, None
-    
+from typing import List, Dict
+from pydantic import ValidationError
 
 
 def get_llm_analysis(full_text: str):
     """
     Queries the local Ollama server to generate a summary, chapters, and Q&A.
+    Validates the output using Pydantic models.
     """
     OLLAMA_API_URL = "http://localhost:11434/api/generate"
     MODEL_NAME = "llama3"
@@ -85,39 +51,35 @@ def get_llm_analysis(full_text: str):
             print(f"Received: {response.text}")
             return None
 
-
-    summary_prompt = f"""
-    Based on the following transcript, provide a concise, high-level summary of about 3-4 sentences.
-    Return ONLY a JSON object with a single key "summary" containing the text.
-    Transcript:
-    ---
-    {full_text[:4000]}
-    """
+    # --- Prompt for Summary ---
+    summary_prompt = SUMMARY_PROMPT.format(transcript=full_text[:4000])
     summary_json = query_ollama(summary_prompt)
-    summary = summary_json.get('summary', 'Could not generate summary.') if summary_json else 'Failed to connect to Ollama.'
+    try:
+        summary_validated = SummaryModel.model_validate(summary_json)
+        summary = summary_validated.summary
+    except Exception as e:
+        print(f"Summary validation error: {e}")
+        summary = summary_json.get('summary', 'Could not generate summary.') if summary_json else 'Failed to connect to Ollama.'
 
-
-    chapters_prompt = f"""
-    Based on the following transcript, identify the main topics and provide a table of contents.
-    Return ONLY a JSON object with a single key "chapters", which is an array of objects, each with "timestamp" (string) and "topic" (string) keys.
-    Find the timestamp from the beginning of the relevant section in the transcript.
-    Transcript:
-    ---
-    {full_text}
-    """
+    # --- Prompt for Chapters ---
+    chapters_prompt = CHAPTERS_PROMPT.format(transcript=full_text)
     chapters_json = query_ollama(chapters_prompt)
-    chapters = chapters_json.get('chapters', []) if chapters_json else []
+    try:
+        chapters_validated = ChaptersModel.model_validate(chapters_json)
+        chapters = [c.model_dump() for c in chapters_validated.chapters]
+    except Exception as e:
+        print(f"Chapters validation error: {e}")
+        chapters = chapters_json.get('chapters', []) if chapters_json else []
 
-
-    qa_prompt = f"""
-    Based on the following transcript, generate 3-4 insightful questions and their answers.
-    Return ONLY a JSON object with a single key "qa", which is an array of objects, each with "question" (string) and "answer" (string) keys.
-    Transcript:
-    ---
-    {full_text[:4000]}
-    """
+    # --- Prompt for Q&A ---
+    qa_prompt = QA_PROMPT.format(transcript=full_text[:4000])
     qa_json = query_ollama(qa_prompt)
-    qa = qa_json.get('qa', []) if qa_json else []
+    try:
+        qa_validated = QAListModel.model_validate(qa_json)
+        qa = [q.model_dump() for q in qa_validated.qa]
+    except Exception as e:
+        print(f"QA validation error: {e}")
+        qa = qa_json.get('qa', []) if qa_json else []
 
     return summary, chapters, qa
 
@@ -129,22 +91,7 @@ def get_gemini_deeper_analysis(text_to_analyze: str):
     API_KEY = "" 
     API_URL = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key={API_KEY}"
 
-    prompt = f"""
-    You are a research assistant. Analyze the following text from a video transcript.
-    Provide a detailed analysis in a structured JSON format.
-
-    The JSON object should have the following keys:
-    - "key_concepts": An array of strings, where each string is a key concept or technical term mentioned.
-    - "eli5": A string that explains the main topic of the text in a very simple, "Explain Like I'm 5" manner.
-    - "follow_up_questions": An array of strings, where each string is a thought-provoking question a student might ask after learning this material.
-
-    Here is the text to analyze:
-    ---
-    {text_to_analyze}
-    ---
-
-    Respond with ONLY the JSON object.
-    """
+    prompt = GEMINI_ANALYSIS_PROMPT.format(text=text_to_analyze)
 
     payload = {
         "contents": [{
@@ -189,21 +136,11 @@ def get_llm_answer(full_text: str, user_question: str, history: List[Dict[str, s
         elif message.get('sender') == 'ai':
             history_prompt += f"You previously answered: {message.get('text')}\n"
 
-    prompt = f"""
-    You are an expert assistant. Your knowledge is based *only* on the provided video transcript.
-    Given the transcript and the recent conversation history, provide a clear and concise answer to the user's current question.
-    If the answer cannot be found in the transcript, say "I cannot answer that based on the video content."
-
-    --- VIDEO TRANSCRIPT ---
-    {full_text[:8000]} 
-    ---
-
-    --- CONVERSATION HISTORY ---
-    {history_prompt if history_prompt else "No previous conversation."}
-    ---
-
-    CURRENT QUESTION: {user_question}
-    """
+    prompt = CUSTOM_QA_PROMPT.format(
+        transcript=full_text[:8000],
+        history=history_prompt if history_prompt else "No previous conversation.",
+        question=user_question
+    )
     try:
         response = requests.post(OLLAMA_API_URL, json={
             "model": MODEL_NAME,
@@ -217,31 +154,41 @@ def get_llm_answer(full_text: str, user_question: str, history: List[Dict[str, s
         return "Failed to get an answer from the language model."
 
 
-def extract_visuals(video_path: str):
-    """Extracts a frame every 30 seconds and returns their timestamps."""
-    visuals = []
-    try:
-        vidcap = cv2.VideoCapture(video_path)
-        fps = vidcap.get(cv2.CAP_PROP_FPS)
-        frame_interval = int(fps * 30)
-        
-        frame_count = 0
-        while True:
-            success, image = vidcap.read()
-            if not success:
-                break
-            
-            if frame_count % frame_interval == 0:
-                current_sec = int(frame_count / fps)
-                minutes = current_sec // 60
-                seconds = current_sec % 60
-                timestamp = f"{minutes:02d}:{seconds:02d}"
-                visuals.append({
-                    "timestamp": timestamp,
-                    "description": f"Visual content at {timestamp}"
-                })
-            frame_count += 1
-    except Exception as e:
-        print(f"Error extracting visuals: {e}")
+# --- 2. REWRITTEN FUNCTION USING PYDANTIC FOR ENFORCEMENT ---
+def generate_flashcards(full_text: str):
+    """
+    Uses an LLM to generate flashcards and validates the output using Pydantic.
+    """
+    OLLAMA_API_URL = "http://localhost:11434/api/generate"
+    MODEL_NAME = "llama3"
 
-    return visuals
+    prompt = FLASHCARD_PROMPT.format(transcript=full_text[:8000])
+
+    try:
+        response = requests.post(OLLAMA_API_URL, json={
+            "model": MODEL_NAME,
+            "prompt": prompt,
+            "stream": False,
+            "format": "json"
+        }, timeout=180)
+        response.raise_for_status()
+        
+        # Parse the entire JSON string from the response
+        llm_output = json.loads(response.json()['response'])
+
+        # Use Pydantic to validate and parse the data
+        # This will raise a ValidationError if the structure is wrong
+        validated_data = FlashcardList.model_validate(llm_output)
+        
+        # Pydantic models can be easily converted back to dicts if needed
+        return validated_data.dict()["flashcards"]
+
+    except ValidationError as e:
+        print(f"Pydantic Validation Error: LLM output did not match the expected format. \n{e}")
+        return None # Or return [] to indicate no valid cards were found
+    except requests.exceptions.RequestException as e:
+        print(f"Error querying Ollama for flashcards: {e}")
+        return None
+    except json.JSONDecodeError as e:
+        print(f"Error decoding JSON from Ollama's response: {e}")
+        return None

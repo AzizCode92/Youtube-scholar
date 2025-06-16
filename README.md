@@ -60,13 +60,14 @@ YouTube Scholar is an AI-powered research assistant for YouTube videos. It allow
 1. **Install backend dependencies:**
    - `pip install -r requirements.txt` (create as needed)
    - Install ffmpeg: `brew install ffmpeg` (macOS)
-2. **Start the FastAPI backend:**
-   - `python main.py`
+2. **Start the FastAPI backend (with uvicorn):**
+   - `python -m uvicorn main:app --reload`
+   - The backend will be available at [http://localhost:8000](http://localhost:8000)
 3. **Install frontend dependencies:**
    - `cd frontend && npm install`
 4. **Start the frontend:**
    - `npm start`
-5. **Open** [http://localhost:3000](http://localhost:3000) in your browser.
+   - The frontend will be available at [http://localhost:3000](http://localhost:3000)
 
 ## Notes
 - The backend uses in-memory storage for task status/results.
